@@ -20,3 +20,8 @@ configuration:
       Where captures relay to (host:port). The default is Midea's
       module.appsmb.com address. Give an IP, because your DNS rewrite points
       module.appsmb.com at this add-on.
+  devices:
+    name: Devices (local control)
+    description: >-
+      Midea dehumidifiers to control over the LAN. Each needs name, ip,
+      device_id, token and key; see the Documentation tab.

@@ -1,3 +1,5 @@
-FROM python:3.13-alpine
-COPY fakecloud.py /app/fakecloud.py
-CMD ["python3", "-u", "-I", "/app/fakecloud.py"]
+FROM python:3.13-slim
+# midea-lan is the library behind the midea_ac_lan integration (local control).
+RUN pip install --no-cache-dir midea-lan==2026.10.0
+COPY fakecloud.py lanbridge.py /app/
+CMD ["python3", "-u", "/app/fakecloud.py"]

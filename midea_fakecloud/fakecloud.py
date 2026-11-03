@@ -14,19 +14,25 @@ length and occurrence) in the recording.
 
 Recordings come from a capture: with capture_minutes > 0, sessions are relayed
 to the real cloud for that many minutes and saved, then capture switches
-itself off. Everything is stdlib-only.
+itself off. The replay side is stdlib-only.
+
+Optionally the add-on also controls the appliances locally (lanbridge.py,
+using midea-lan), so one add-on replaces the midea_ac_lan integration.
 """
 
 import asyncio
 import base64
 import hashlib
 import json
+import logging
 import os
 import socket
 import time
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+
+import lanbridge
 
 OPTIONS_FILE = Path(os.environ.get("FAKECLOUD_OPTIONS", "/data/options.json"))
 CONFIG_DIR = Path(os.environ.get("FAKECLOUD_CONFIG", "/config"))
@@ -203,6 +209,8 @@ class Mqtt:
         self.username, self.password = username or "", password or ""
         self.will_topic = will_topic
         self.writer = None
+        self.subscriptions = []  # topic filters, QoS 0
+        self.on_message = None  # callback(topic, payload bytes)
 
     @staticmethod
     def _str(s: str) -> bytes:
@@ -248,11 +256,13 @@ class Mqtt:
                     raise ConnectionError(f"MQTT broker refused the connection (CONNACK {ack.hex()})")
                 self.writer = writer
                 log(f"MQTT connected to {self.host}:{self.port}")
+                for pid, topic in enumerate(self.subscriptions, start=1):
+                    writer.write(self._packet(0x82, pid.to_bytes(2, "big") + self._str(topic) + b"\x00"))
                 await on_connect()
                 pinger = asyncio.create_task(self._ping())
                 try:
-                    while True:  # drain whatever the broker sends (PINGRESP)
-                        await reader.readexactly(1)
+                    while True:  # PUBLISH goes to on_message; the rest (SUBACK, PINGRESP) is dropped
+                        first = (await reader.readexactly(1))[0]
                         n, shift = 0, 0
                         while True:
                             b = (await reader.readexactly(1))[0]
@@ -260,11 +270,21 @@ class Mqtt:
                             shift += 7
                             if not b & 0x80:
                                 break
-                        await reader.readexactly(n)
+                        body = await reader.readexactly(n)
+                        if first & 0xF0 == 0x30 and self.on_message:
+                            tlen = int.from_bytes(body[:2], "big")
+                            start = 2 + tlen + (2 if (first >> 1) & 3 else 0)
+                            self.on_message(body[2:2 + tlen].decode(errors="replace"), body[start:])
                 finally:
                     pinger.cancel()
             except (OSError, asyncio.IncompleteReadError, asyncio.TimeoutError, ConnectionError) as e:
                 log(f"MQTT: {e!r}; retrying in 15 s")
+            except asyncio.CancelledError:
+                if self.writer:
+                    self.writer.close()
+                raise
+            if self.writer:
+                self.writer.close()
             self.writer = None
             await asyncio.sleep(15)
 
@@ -289,6 +309,7 @@ class App:
         saved = json.loads(self.state_file.read_text()) if self.state_file.exists() else {}
         self.modules = {ip: Module(ip, s) for ip, s in saved.get("modules", {}).items()}
         self.capture_started = None
+        self.bridges = {}  # device_id -> lanbridge.DeviceBridge
         self.mqtt = None
         self.bind = None
         self._conn = 0
@@ -382,8 +403,12 @@ class App:
 
     def announce(self, mod: Module) -> None:
         state = f"midea_fakecloud/{mod.slug}/state"
-        device = {"identifiers": [f"midea_fakecloud_{mod.slug}"], "name": f"Midea fake cloud {mod.ip}",
-                  "manufacturer": "midea-fakecloud", "model": "Replayed Midea cloud"}
+        bridge = next((b for b in self.bridges.values() if b.ip == mod.ip), None)
+        # With local control configured for this module, its cloud sensors
+        # join the appliance's device instead of getting one of their own.
+        device = bridge.device_info() if bridge else {
+            "identifiers": [f"midea_fakecloud_{mod.slug}"], "name": f"Midea fake cloud {mod.ip}",
+            "manufacturer": "midea-fakecloud", "model": "Replayed Midea cloud"}
         common = {"state_topic": state, "availability_topic": "midea_fakecloud/status", "device": device}
         entities = [
             ("binary_sensor", "connected", {"name": "Cloud session", "device_class": "connectivity",
@@ -407,8 +432,32 @@ class App:
         for mod in self.modules.values():
             mod.announced = False
         self.mqtt.publish("midea_fakecloud/status", "online")
+        for bridge in self.bridges.values():
+            bridge.announce()
+            bridge.publish_state()
         for mod in self.modules.values():
             self.publish(mod)
+
+    def mqtt_publish(self, topic: str, payload) -> None:
+        if self.mqtt:
+            self.mqtt.publish(topic, payload)
+
+    def on_mqtt_message(self, topic: str, payload: bytes) -> None:
+        parsed = lanbridge.parse_command(topic)
+        bridge = self.bridges.get(parsed[0]) if parsed else None
+        if bridge:
+            asyncio.get_running_loop().create_task(bridge.command(parsed[1], payload.decode(errors="replace")))
+
+    def start_bridges(self, factory=None) -> None:
+        loop = asyncio.get_running_loop()
+        for cfg in self.options.get("devices") or []:
+            try:
+                bridge = lanbridge.DeviceBridge(cfg, self.mqtt_publish, loop, factory)
+            except (ValueError, KeyError, ImportError) as e:
+                log(f"local control for {cfg.get('name') or cfg.get('ip')} not started: {e}")
+                continue
+            self.bridges[bridge.device_id] = bridge
+            bridge.start()
 
     def session_open(self, mod: Module, status: str) -> None:
         mod.active += 1
@@ -652,9 +701,12 @@ class App:
         if mq:
             self.mqtt = Mqtt(mq["host"], mq["port"], mq.get("username"), mq.get("password"),
                              "midea_fakecloud/status")
+            self.mqtt.subscriptions = ["midea_fakecloud/dev/+/set/+"]
+            self.mqtt.on_message = self.on_mqtt_message
             asyncio.create_task(self.mqtt.run(self.on_mqtt_connect))
         else:
-            log("no MQTT service; sensors disabled")
+            log("no MQTT service; sensors and local control disabled")
+        self.start_bridges()
         if self.capture_minutes() > 0:
             log(f"capture armed: the next {self.capture_minutes()} min of sessions go to the real cloud")
         return servers
@@ -677,7 +729,7 @@ def primary_ipv4() -> str:
 
 PANEL_HTML = """<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Midea fake cloud</title>
+<title>Midea Local</title>
 <style>
 :root{--bg:#fafafa;--fg:#1c1c1c;--muted:#666;--line:#ddd;--ok:#1b7f3b;--warn:#b25e00}
 @media (prefers-color-scheme:dark){:root{--bg:#111;--fg:#e6e6e6;--muted:#9a9a9a;--line:#333;--ok:#5fd17f;--warn:#f0a040}}
@@ -687,7 +739,7 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--li
 th{color:var(--muted);font-weight:500}.muted{color:var(--muted)}.ok{color:var(--ok)}.warn{color:var(--warn)}
 button{font:inherit;padding:3px 10px;cursor:pointer}a{color:inherit}
 </style></head><body>
-<h1>Midea fake cloud</h1><div class="muted" id="meta">Loading…</div>
+<h1>Midea Local</h1><div class="muted" id="meta">Loading…</div>
 <h2>Modules</h2><table id="mods"></table>
 <h2>Recordings</h2><table id="recs"></table>
 <p><label>Upload a recording (this add-on's .json or a JSONL relay log): <input type="file" id="up"></label></p>
@@ -719,6 +771,8 @@ load(); setInterval(load,10000);
 
 
 async def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(name)s: %(message)s", datefmt="%H:%M:%S")
+    logging.getLogger("midealan").setLevel(logging.WARNING)
     options = json.loads(OPTIONS_FILE.read_text())
     app = App(options)
     await app.start()

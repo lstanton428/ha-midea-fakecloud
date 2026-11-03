@@ -165,7 +165,7 @@ class FakeCloudTest(unittest.IsolatedAsyncioTestCase):
         app = await self.start("d", {})
         code, body = await http(app.http_port, "GET", "/")
         self.assertEqual(code, 200)
-        self.assertIn(b"Midea fake cloud", body)
+        self.assertIn(b"Midea Local", body)
         code, body = await http(app.http_port, "POST", "/api/recordings", relay_log().encode())
         self.assertEqual(code, 200)
         variant = json.loads(body)["variant"]

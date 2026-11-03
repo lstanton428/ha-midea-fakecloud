@@ -1,20 +1,60 @@
-# Midea fake cloud
+# Midea Local
 
-A Midea appliance's Wi-Fi module (dehumidifiers, air conditioners) keeps a
+This add-on does two things for Midea dehumidifiers, with no Midea cloud
+involved:
+
+1. **Local control.** It talks to the appliance over your LAN and gives Home
+   Assistant a full device: the dehumidifier (on/off, mode, target humidity),
+   fan speed, beep on/off, humidity, temperature, tank level, tank-full and
+   filter alerts. This replaces the `midea_ac_lan` integration.
+2. **Fake cloud.** It stands in for Midea's cloud so the appliance's Wi-Fi
+   stays connected (below).
+
+## Local control
+
+Needs MQTT (the Mosquitto add-on). Add each appliance under **devices**:
+
+```yaml
+devices:
+  - name: Dehumidifier
+    ip: 192.168.30.121
+    device_id: 151732607699241
+    token: <128 hex characters>
+    key: <64 hex characters>
+    model: 00000Q1A      # optional
+    subtype: 41377       # optional
+    area: Bedroom        # optional, suggested area for the new device
+```
+
+`device_id`, `token` and `key` are the same values `midea_ac_lan` stores. If
+you are moving from that integration, copy them from its config entry, or
+fetch them once with the `midea-lan` command-line tool. `protocol`
+(default 3), `port` (default 6444), `refresh_interval` (seconds, default
+30) and `type` (only 161, dehumidifier, is supported) are optional.
+
+Entity IDs follow `midea_ac_lan` (`humidifier.<device_id>_humidifier`,
+`select.<device_id>_fan_speed`, ...), so dashboards and automations keep
+working if you remove the integration's entities first. Set
+`entity_id_prefix` to use something other than the device ID, for example
+to try the add-on alongside the integration.
+
+## Fake cloud
+
+A Midea appliance's Wi-Fi module keeps a
 connection open to Midea's cloud. Block its internet access, as you would for
 a device you control locally, and the module reboots its Wi-Fi every few
 minutes looking for the cloud. That is hundreds of reconnects a day.
 
-This add-on stands in for the cloud. The module connects to it, gets the
-answers it expects, and stays put. Your local integration (for example
-`midea_ac_lan`) keeps working as before; it talks to the appliance directly
-and never goes through this add-on.
+The add-on stands in for the cloud. The module connects to it, gets the
+answers it expects, and stays put. Local control (above) talks to the
+appliance directly and doesn't depend on the fake cloud, and the fake cloud
+works without local control too.
 
 **Status: experimental.** It has been proven on one dehumidifier module.
 Whether your module works depends on a firmware quirk, and the add-on checks
 for it (see "Compatibility").
 
-## How it works
+### How it works
 
 The module opens each cloud session with a 424-byte handshake. That handshake
 should be random, but on the modules this was built for it cycles through a
@@ -29,7 +69,7 @@ messages are replies (heartbeat and acknowledgement). In testing, the real cloud
 never sent anything unprompted, and replaying never changed the appliance's
 settings.
 
-## Setup
+### Setup
 
 1. **Make the module find this add-on.** In your DNS server (AdGuard Home,
    Pi-hole or your router), rewrite `module.appsmb.com` to your Home Assistant
@@ -52,14 +92,14 @@ settings.
 5. That's it. The panel should show the module as "replaying", and its
    Wi-Fi should stop reconnecting.
 
-## Compatibility
+### Compatibility
 
 The add-on counts the distinct handshakes each module sends. If a module sends
 more than four different ones, its handshake is genuinely random, replay
 cannot work, and the status says "unsupported". You can check this before
 capturing anything: just do steps 1–3 and watch for a few minutes.
 
-## What to expect
+### What to expect
 
 - **Wi-Fi stays connected.** This is the point.
 - **The TCP session to the add-on renews every few minutes.** The module
@@ -80,11 +120,12 @@ capturing anything: just do steps 1–3 and watch for a few minutes.
 | `port` | Always 443 for real modules. |
 | `capture_minutes` | 0 for replay only. 1–30 relays that many minutes to the real cloud, then resets to 0. |
 | `upstream` | The real cloud as `ip:port`, used only during capture. |
+| `devices` | Appliances to control locally (see "Local control"). |
 
-## Sensors
+## Fake-cloud sensors
 
-With the Mosquitto add-on (or another MQTT broker set up in HA), each module
-gets a device with these entities:
+With MQTT, each module also gets these entities (on the appliance's device
+when local control is set up for it):
 
 - **Cloud session**: connectivity; stays on across the brief renewals.
 - **Session started**: when the current session began.
