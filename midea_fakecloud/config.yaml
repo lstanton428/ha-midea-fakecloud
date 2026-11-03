@@ -1,5 +1,5 @@
 name: Midea Local
-version: "0.2.0"
+version: "0.2.1"
 slug: midea_fakecloud
 description: Local control for Midea dehumidifiers, plus a stand-in for Midea's cloud so their Wi-Fi stays connected.
 url: https://github.com/lstanton428/ha-midea-fakecloud

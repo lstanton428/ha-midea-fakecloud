@@ -128,7 +128,7 @@ class DeviceBridge:
                 "state_topic": state, "value_template": "{{ value_json.current_humidity }}"}),
             ("sensor", "current_temperature", {
                 "name": "Current Temperature", "device_class": "temperature",
-                "unit_of_measurement": "°C", "state_class": "measurement",
+                "unit_of_measurement": "°C", "state_class": "measurement", "suggested_display_precision": 1,
                 "state_topic": state, "value_template": "{{ value_json.current_temperature }}"}),
             ("sensor", "tank", {
                 "name": "Tank", "icon": "mdi:cup-water", "unit_of_measurement": "%",

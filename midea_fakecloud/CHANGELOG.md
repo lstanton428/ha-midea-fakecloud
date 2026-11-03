@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- Temperature shows one decimal place, as in midea_ac_lan.
+
 ## 0.2.0
 
 - Local control: the add-on now talks to Midea dehumidifiers over the LAN
