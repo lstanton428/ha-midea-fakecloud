@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+# Recordings and logs are device-specific and stay on your HA host.
+*.jsonl
+recordings/
+device.json

@@ -1,0 +1,22 @@
+configuration:
+  bind_address:
+    name: Listen address
+    description: >-
+      LAN address to accept module connections on. "auto" uses the host's
+      primary interface, which keeps the add-on off Tailscale's addresses.
+  port:
+    name: Port
+    description: Midea modules always connect to 443. Change only for testing.
+  capture_minutes:
+    name: Capture minutes
+    description: >-
+      0 = replay only (normal). Set to 10 to relay the next 10 minutes of
+      sessions to Midea's real cloud and save them as recordings. The module
+      can reach Midea's cloud during that window. Capture switches itself back
+      to 0 when the window ends.
+  upstream:
+    name: Real cloud address
+    description: >-
+      Where captures relay to (host:port). The default is Midea's
+      module.appsmb.com address. Give an IP, because your DNS rewrite points
+      module.appsmb.com at this add-on.

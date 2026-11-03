@@ -1,0 +1,32 @@
+name: Midea fake cloud
+version: "0.1.0"
+slug: midea_fakecloud
+description: Keeps Midea Wi-Fi modules online without Midea's cloud by replaying a recorded cloud session.
+url: https://github.com/lstanton428/ha-midea-fakecloud
+arch:
+  - amd64
+  - aarch64
+startup: services
+boot: auto
+# The module only ever connects to port 443. Host networking lets the add-on
+# listen on the LAN address alone, leaving 443 on Tailscale's address free.
+host_network: true
+hassio_api: true
+ingress: true
+ingress_port: 0
+panel_icon: mdi:cloud-sync-outline
+panel_title: Midea cloud
+map:
+  - addon_config:rw
+services:
+  - mqtt:want
+options:
+  bind_address: auto
+  port: 443
+  capture_minutes: 0
+  upstream: "3.33.221.184:443"
+schema:
+  bind_address: str
+  port: port
+  capture_minutes: int(0,30)
+  upstream: str
