@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2
+
+- Stops cleanly when Home Assistant stops the add-on (it was being marked
+  "error"), closing appliance connections first.
+
 ## 0.2.1
 
 - Temperature shows one decimal place, as in midea_ac_lan.

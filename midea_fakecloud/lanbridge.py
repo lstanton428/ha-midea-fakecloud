@@ -37,6 +37,7 @@ class DeviceBridge:
     # --- device side -------------------------------------------------
 
     def start(self) -> None:
+        self.device.daemon = True  # never hold up the add-on's exit
         self.device.open()
         log.info("%s: connecting to %s:%s", self.name, self.ip, self.cfg.get("port") or 6444)
 

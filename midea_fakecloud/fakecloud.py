@@ -26,6 +26,7 @@ import hashlib
 import json
 import logging
 import os
+import signal
 import socket
 import time
 import urllib.request
@@ -776,7 +777,13 @@ async def main() -> None:
     options = json.loads(OPTIONS_FILE.read_text())
     app = App(options)
     await app.start()
-    await asyncio.Event().wait()
+    stop = asyncio.Event()
+    for sig in (signal.SIGTERM, signal.SIGINT):  # the Supervisor stops add-ons with SIGTERM
+        asyncio.get_running_loop().add_signal_handler(sig, stop.set)
+    await stop.wait()
+    for bridge in app.bridges.values():
+        bridge.stop()
+    log("stopped")
 
 
 if __name__ == "__main__":
